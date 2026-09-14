@@ -1,38 +1,49 @@
 /*
 Assignment name  : mini_serv
 Expected files   : mini_serv.c
-Allowed functions: write, close, select, socket, accept, listen, send, recv, bind, strstr, malloc, realloc, free, calloc, bzero, atoi, sprintf, strlen, exit, strcpy, strcat, memset
+Allowed functions: write, close, select, socket, accept, listen, send, recv,
+				   bind, strstr, malloc, realloc, free, calloc, bzero, atoi,
+				   sprintf, strlen, exit, strcpy, strcat, memset
 --------------------------------------------------------------------------------
 
-Write a program that will listen for client to connect on a certain port on 127.0.0.1 and will let clients to speak with each other
+Write a program that will listen for client to connect on a certain port on 127.0.0.1
+and will let clients to speak with each other
 
 This program will take as first argument the port to bind to
-If no argument is given, it should write in stderr "Wrong number of arguments" followed by a \n and exit with status 1
-If a System Calls returns an error before the program start accepting connection, it should write in stderr "Fatal error" followed by a \n and exit with status 1
-If you cant allocate memory it should write in stderr "Fatal error" followed by a \n and exit with status 1
+- If no argument is given, it should write in stderr "Wrong number of arguments" followed by a \n
+  and exit with status 1
+- If a System Calls returns an error before the program start accepting connection,
+  it should write in stderr "Fatal error" followed by a \n and exit with status 1
+- If you cant allocate memory it should write in stderr "Fatal error" followed by a \n
+  and exit with status 1
 
-Your program must be non-blocking but client can be lazy and if they don't read your message you must NOT disconnect them...
+Your program must be non-blocking but client can be lazy and if they don't read your
+message you must NOT disconnect them...
 
 Your program must not contains #define preproc
 Your program must only listen to 127.0.0.1
-The fd that you will receive will already be set to make 'recv' or 'send' to block if select hasn't be called before calling them, but will not block otherwise. 
+The fd that you will receive will already be set to make 'recv' or 'send' to block
+if select hasn't be called before calling them, but will not block otherwise. 
 
 When a client connect to the server:
-- the client will be given an id. the first client will receive the id 0 and each new client will received the last client id + 1
+- the client will be given an id. the first client will receive the id 0 and each
+  new client will received the last client id + 1
 - %d will be replace by this number
 - a message is sent to all the client that was connected to the server: "server: client %d just arrived\n"
 
 clients must be able to send messages to your program.
 - message will only be printable characters, no need to check
 - a single message can contains multiple \n
-- when the server receive a message, it must resend it to all the other client with "client %d: " before every line!
+- when the server receive a message, it must resend it to all the other client with "client %d: "
+  before every line!
 
 When a client disconnect from the server:
 - a message is sent to all the client that was connected to the server: "server: client %d just left\n"
 
 Memory or fd leaks are forbidden
 
-To help you, you will find the file main.c with the beginning of a server and maybe some useful functions. (Beware this file use forbidden functions or write things that must not be there in your final program)
+To help you, you will find the file main.c with the beginning of a server and maybe some useful functions.
+(Beware this file use forbidden functions or write things that must not be there in your final program)
 
 Warning our tester is expecting that you send the messages as fast as you can. Don't do un-necessary buffer.
 
@@ -43,40 +54,89 @@ Hint: you should use nc to test your program
 Hint: To test you can use fcntl(fd, F_SETFL, O_NONBLOCK) but use select and NEVER check EAGAIN (man 2 send)
 */
 
+/*
+	1. includes ajouter stdio et stdlib
+	2. remplacer printf par sprintf
+*/
+
+
+// ----------------------------------------------------------------------------
+// includes
+// ----------------------------------------------------------------------------
 #include <errno.h>
 #include <string.h>
 #include <unistd.h>
 #include <netdb.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <stdio.h>			// sprintf
+#include <stdlib.h>			// malloc, calloc, realloc, free
+#include <sys/select.h>		// select
 
+// ----------------------------------------------------------------------------
+// variables
+// ----------------------------------------------------------------------------
+
+
+
+//* ----------------------------------------------------------------------------
+//* (OK) extract_message
+//* ----------------------------------------------------------------------------
+// Role : chercher un '\n' dans *buf. Si trouve, decouper le buffer en deux :
+//   - *msg : un message complet (tout ce qui precede le '\n' + '\n')
+//   - *buf : tout ce qui reste dans le buffer apres le premier '\n' trouve
+// Retour :
+// 	 1 -> un msg complet a ete extrait
+//   0 -> pas de '\n' trouve (message incomplet, il faut recv() encore)
+//  -1 -> erreur d'allocation
 int extract_message(char **buf, char **msg)
 {
+	//& 1. declaration des variables
 	char	*newbuf;
-	int	i;
+	int		i;
+	*msg = 0;	// par defaut, pas de msg extrait
 
-	*msg = 0;
+	//& 2. check *buf vide
 	if (*buf == 0)
 		return (0);
+	
+	//& 3. boucle de lecture du buf
 	i = 0;
 	while ((*buf)[i])
 	{
+		//& 1. si fin de la ligne trouvee
 		if ((*buf)[i] == '\n')
 		{
+			//& 1. allouer un newbuff pour extraire le message
+			// calloc -> newbuf se termine avec '\0'
 			newbuf = calloc(1, sizeof(*newbuf) * (strlen(*buf + i + 1) + 1));
 			if (newbuf == 0)
-				return (-1);
+				return (-1); // echec d'allocation
+			
+			//& 2. copier dans newbuf la reste de buf (apres la premiere '\n')
 			strcpy(newbuf, *buf + i + 1);
+
+			//& 3. extraire la ligne dans msg
+			// pointer vers buf et ajoute un 0 apres la premiere '\n'
+			// pour tronquer la chaine)
 			*msg = *buf;
-			(*msg)[i + 1] = 0;
+			(*msg)[i + 1] = 0; // 0 == '\0'
+			
+			//& 4. mettre a jour buf
 			*buf = newbuf;
 			return (1);
 		}
+		//& 2. si pas de fin de ligne trouvee, passer au char suivant
 		i++;
 	}
+
+	//& 4. pas de ligne complete, en attente d'autre send()
 	return (0);
 }
 
+// ----------------------------------------------------------------------------
+// (OK) strjoin
+// ----------------------------------------------------------------------------
 char *str_join(char *buf, char *add)
 {
 	char	*newbuf;
