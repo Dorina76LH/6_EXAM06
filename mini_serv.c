@@ -55,8 +55,10 @@ Hint: To test you can use fcntl(fd, F_SETFL, O_NONBLOCK) but use select and NEVE
 */
 
 /*
-	1. includes ajouter stdio et stdlib
-	2. remplacer printf par sprintf
+	1. includes a ajouter : stdio, stdlib, sys/select
+	2. declarer les variables globales
+	3. remplacer printf par sprintf
+	4. remplacer les msg erreur
 */
 
 
