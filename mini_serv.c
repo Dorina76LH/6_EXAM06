@@ -134,26 +134,51 @@ int extract_message(char **buf, char **msg)
 	return (0);
 }
 
-// ----------------------------------------------------------------------------
-// (OK) strjoin
-// ----------------------------------------------------------------------------
+//* ----------------------------------------------------------------------------
+//* (OK) strjoin
+//* ----------------------------------------------------------------------------
+// ajoute 'add' dans 'buf'
+//   - buf : buffer contenant les caracteres deja recus
+//   - add : conentant les caracteres recues via send()
+//   - newbuf : cumul de buf et add
+//  Return
+//     0 -> erreur d'allocation
+//     newbuf -> buffer contenant buf et add
+// char *strcat(char *dest, const char *src);
+// he  strcat() function appends the src string to the dest string, over‐
+// writing the terminating null byte ('\0') at the end of dest,  and  then
+// adds  a  terminating  null  byte.
 char *str_join(char *buf, char *add)
 {
+	//& 1. declaration des variables
 	char	*newbuf;
 	int		len;
 
+	//& 2. calculer len
 	if (buf == 0)
 		len = 0;
 	else
 		len = strlen(buf);
+	
+	//& 3. allouer newnuf (buf + add)
 	newbuf = malloc(sizeof(*newbuf) * (len + strlen(add) + 1));
+	
+	//& 4. erreur d'allocation
 	if (newbuf == 0)
 		return (0);
-	newbuf[0] = 0;
+	
+	//& 5. copier buf dans newbuf
+	newbuf[0] = 0; // vider newbuf
 	if (buf != 0)
 		strcat(newbuf, buf);
+	
+	//& 6. liberer buf
 	free(buf);
+	
+	//& 7. ajouter 'add' dans 'newbuf'
 	strcat(newbuf, add);
+	
+	//& 8. retourner newbuf (a la palce de buf)
 	return (newbuf);
 }
 
