@@ -78,8 +78,21 @@ Hint: To test you can use fcntl(fd, F_SETFL, O_NONBLOCK) but use select and NEVE
 // ----------------------------------------------------------------------------
 // variables
 // ----------------------------------------------------------------------------
-
-
+int max_fd;							// fd max actuel a passer a select()
+int server_fd;						// fd du socket serveur cree par socket ()
+int next_id = 0;					// compteur global pour attribuer les id client
+int ids[1024];						// id logique du client sur ce fd
+fd_set afds;						// "all fds" : ensemble persistant de tous les fds actifs (serveur + clients connectes)
+fd_set wfds;    					// copie tmp de afds, passee a select() pour tester qui peut recevoir un send() sans bloquer (ECRITURE)
+fd_set rfds;    					// copie tmp de afds, passee a select() pour tester qui a des donnees a lire (LECTURE)
+char *clts_recv_buf[1024] = {0};	// par client : donnees recues, en attente d'un '\n' complet
+char *clts_send_buf[1024] = {0};   	// par client : donnees a envoyer, en attente que send() les accepte
+char recv_buf[1000001] = {0};		// buff tmp qui ser a stocker ce que recv() vient de lire	
+char send_buf[1000001] = {0};		// buf tmp qui sert a construire le msg a broadcaster, avant send()
+// recv_buf et send_buf
+//   - taille 1 000 000 caracteres + 1 pour le '\0'
+//   - variables globales, taille fixe connue a la compilation
+//   - pas de malloc/free -> pas de leak possible
 
 //* ----------------------------------------------------------------------------
 //* (OK) extract_message
