@@ -327,7 +327,7 @@ void register_client(int fd)
 	//& 3. construire le msg dans send_buf
 	sprintf(serv_send_buf, "server: client %d just arrived\n", ids[fd]);
 
-	//& 4. broadcast le msg
+	//& 4. broadcast le msg a tous les autres clients actifs
 	broadcast_str(fd, serv_send_buf);
 }
 
@@ -354,9 +354,53 @@ void remove_client(int fd)
 	//& 3. construire le msg dans send_buf
 	sprintf(serv_send_buf, "server: client %d just left\n", ids[fd]);
 
-	//& 4. broadcast le msg
+	//& 4. broadcast le msg a tous les autres clients actifs
 	broadcast_str(fd, serv_send_buf);
 }
+
+//? ---------------------------------------------------------------------------
+//? (NEW) handle_client_message
+//? ---------------------------------------------------------------------------
+// Role : traiter les donnees recues d'un client
+//  - extrait chaque ligne complete disponible dans son buffer de reception
+//    (une seule reception peut contenir plusieurs lignes, ou une ligne
+//    incomplete qui attend encore un send() suivant)
+//  - prefixe chaque ligne avec "client %d: " (une fois par ligne, pas par
+//    message entier)
+//  - delegue l'envoi reel a broadcast_str
+// valeur de retour extract_message :
+//   1 -> un msg complet a ete extrait
+//   0 -> pas de '\n' trouve (message incomplet, il faut recv() encore)
+//  -1 -> erreur d'allocation
+void handle_client_msg(int fd)
+{
+	//& 1. declaration des variables
+	char *message;
+	int ret = extract_message(&clts_recv_buf[fd], &message);
+
+	//& 2. boucle tant qu'il y a des messages complets a traiter
+	while (ret == 1)
+	{
+		//& 2.1 construire le msg a diffuser
+		sprintf(serv_send_buf, "client %d: %s", ids[fd], message);
+
+		//& 2.2 diffuser le msg
+		broadcast_str(fd, serv_send_buf);
+
+		//& 2.3 liberer les ressources (message alloue par extract_message)
+		free(message);
+
+		//& 2.4 tenter de recuperer la ligne suivante
+		ret = extract_message(&clts_recv_buf[fd], &message);
+	}
+
+	//& 3. erreur d'allocation
+	if (ret == -1)
+	{
+		error_exit("Fatal error\n");
+	}
+}
+
 
 int main() {
 	int sockfd, connfd, len;
