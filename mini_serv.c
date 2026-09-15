@@ -61,6 +61,34 @@ Hint: To test you can use fcntl(fd, F_SETFL, O_NONBLOCK) but use select and NEVE
 	4. remplacer les msg erreur
 */
 
+// int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout);
+// select() allows a program to monitor multiple file descriptors, waiting
+// until one or more of the file descriptors become "ready" for some class
+// of I/O operation
+// void FD_CLR(int fd, fd_set *set);   -> retire fd de l'ensemble -> met son bit a 0
+// int  FD_ISSET(int fd, fd_set *set); -> teste si fd est present -> bit a 1 ou 0
+// void FD_SET(int fd, fd_set *set);   -> ajoute fd a l'ensemble -> met son bit a 1
+// void FD_ZERO(fd_set *set);          -> vide l'ensemble -> met tous les bits a 0
+// FD_SETSIZE -> par defaut vaut 1024 -> ids[1024] & clts_recv_buf[1024]
+
+// fd_set
+//   - type dedie (bitset), un bit par fd possible
+//   - a manipuler uniquement via les macros ci-dessus, jamais directement
+//   - afds = source de verite, modifiee seulement par nous (FD_SET/FD_CLR)
+//   - rfds/wfds = copies temporaires de afds, modifiees par select() lui-meme
+//     (il retire les fds pas prets), donc a recopier depuis afds a chaque tour
+
+// clts_recv_buf[1024]
+//   - le TABLEAU de 1024 pointeurs est global -> stocke dans le BSS
+//   - CE VERS QUOI CHAQUE POINTEUR POINTE est alloue dynamiquement (str_join,
+//     malloc/calloc) -> stocke sur le tas (heap)
+//   - a liberer (free) individuellement pour chaque fd, dans remove_client()
+//     (deconnexion normale) ou cleanup() (erreur fatale) -> sinon memory leak
+
+// recv_buf et send_buf
+//   - taille 1 000 000 caracteres + 1 pour le '\0'
+//   - variables globales, taille fixe connue a la compilation
+//   - pas de malloc/free -> pas de leak possible
 
 // ----------------------------------------------------------------------------
 // includes
@@ -74,6 +102,7 @@ Hint: To test you can use fcntl(fd, F_SETFL, O_NONBLOCK) but use select and NEVE
 #include <stdio.h>			// sprintf
 #include <stdlib.h>			// malloc, calloc, realloc, free
 #include <sys/select.h>		// select
+
 
 // ----------------------------------------------------------------------------
 // variables
@@ -89,10 +118,6 @@ char *clts_recv_buf[1024] = {0};	// par client : donnees recues, en attente d'un
 char *clts_send_buf[1024] = {0};   	// par client : donnees a envoyer, en attente que send() les accepte
 char recv_buf[1000001] = {0};		// buff tmp qui ser a stocker ce que recv() vient de lire	
 char send_buf[1000001] = {0};		// buf tmp qui sert a construire le msg a broadcaster, avant send()
-// recv_buf et send_buf
-//   - taille 1 000 000 caracteres + 1 pour le '\0'
-//   - variables globales, taille fixe connue a la compilation
-//   - pas de malloc/free -> pas de leak possible
 
 //* ----------------------------------------------------------------------------
 //* (OK) extract_message
@@ -197,6 +222,47 @@ char *str_join(char *buf, char *add)
 	return (newbuf);
 }
 
+//? ---------------------------------------------------------------------------
+//? (NEW) cleanup
+//? ---------------------------------------------------------------------------
+// Role : en cas d'erreur fatal (juste avant exit(1))
+//  - ferme tous les fds actifs (serveur et clients)
+//  - libere tous les buffers pour eviter les memory leak
+void cleanup()
+{
+	//& 1. parcourir les fd (de 0 jusqu'a fd_max)
+	for (int fd = 0 ; fd <= max_fd ; fd++)
+	{
+		//& si le fd est actuellement actif
+		if (FD_ISSET(fd, &afds))
+		{
+			//& fermer le fd
+			close(fd);
+
+			//& liberer le buffer
+			free(clts_recv_buf[fd]);
+		}
+	}
+}
+
+//? ---------------------------------------------------------------------------
+//? (NEW) error_exit
+//? ---------------------------------------------------------------------------
+// Role : en cas d'erreur fatal
+//  - appelle cleanup pour liberer les ressources
+//  - imprime le message d'erreur sur le stderr
+//  - exit avec code 1
+void error_exit(char *str) {
+	
+	//& 1. liberer les ressources (fds et buffers)
+	cleanup();
+
+	//& 2. ecrire le message d'erreur sur stderr
+	write(2, str, strlen(str));
+
+	//& 3.quitter avec code 1
+	exit(1);
+}
 
 int main() {
 	int sockfd, connfd, len;
