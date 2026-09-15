@@ -264,6 +264,23 @@ void error_exit(char *str) {
 	exit(1);
 }
 
+//? ---------------------------------------------------------------------------
+//? (NEW) resgister_client
+//? ---------------------------------------------------------------------------
+// Role :
+
+void register_client(int fd)
+{
+	//& 1. update fd_max
+	if (fd > max_fd)
+		max_fd = fd;
+
+	//& 2. register client
+	FD_SET(fd, &afds);
+
+	
+}
+
 int main() {
 	int sockfd, connfd, len;
 	struct sockaddr_in servaddr, cli; 
