@@ -85,10 +85,27 @@ Hint: To test you can use fcntl(fd, F_SETFL, O_NONBLOCK) but use select and NEVE
 //   - a liberer (free) individuellement pour chaque fd, dans remove_client()
 //     (deconnexion normale) ou cleanup() (erreur fatale) -> sinon memory leak
 
-// recv_buf et send_buf
+// serv_recv_buf et serv_send_buf
 //   - taille 1 000 000 caracteres + 1 pour le '\0'
 //   - variables globales, taille fixe connue a la compilation
 //   - pas de malloc/free -> pas de leak possible
+
+// REGLE : tableau -> pointeur (array-to-pointer decay)
+//   - le NOM d'un tableau, utilise seul dans une expression, est
+//     automatiquement converti en un pointeur vers son 1er element
+//   - char buf[10]; -> "buf" utilise seul vaut &buf[0], donc un char*
+//   - c'est pour ca qu'on peut passer directement send_buf/recv_buf
+//     (des tableaux) a des fonctions qui attendent un char*
+//     (ex: sprintf, strlen, strcpy, recv, send...)
+//   - aucune conversion explicite/cast necessaire, c'est automatique
+
+// sprintf(str, format, ...)
+//   - ECRIT DIRECTEMENT en memoire a l'adresse pointee par 'str'
+//     (comme strcat/strcpy), ne "retourne" pas un nouveau buffer
+//   - ne verifie JAMAIS la taille du buffer de destination
+//     -> ici sans risque car send_buf fait 1 000 000 char (tres large)
+//     -> mais a savoir : sprintf peut faire un buffer overflow si le
+//        texte formate depasse la taille reelle du buffer
 
 // ----------------------------------------------------------------------------
 // includes
@@ -115,9 +132,9 @@ fd_set afds;						// "all fds" : ensemble persistant de tous les fds actifs (ser
 fd_set wfds;    					// copie tmp de afds, passee a select() pour tester qui peut recevoir un send() sans bloquer (ECRITURE)
 fd_set rfds;    					// copie tmp de afds, passee a select() pour tester qui a des donnees a lire (LECTURE)
 char *clts_recv_buf[1024] = {0};	// par client : donnees recues, en attente d'un '\n' complet
-char *clts_send_buf[1024] = {0};   	// par client : donnees a envoyer, en attente que send() les accepte
-char recv_buf[1000001] = {0};		// buff tmp qui ser a stocker ce que recv() vient de lire	
-char send_buf[1000001] = {0};		// buf tmp qui sert a construire le msg a broadcaster, avant send()
+//char *clts_send_buf[1024] = {0};  // par client : donnees a envoyer, en attente que send() les accepte
+char serv_recv_buf[1000001] = {0};		// buff tmp qui ser a stocker ce que recv() vient de lire	
+char serv_send_buf[1000001] = {0};		// buf tmp qui sert a construire le msg a broadcaster, avant send()
 
 //* ----------------------------------------------------------------------------
 //* (OK) extract_message
@@ -265,20 +282,80 @@ void error_exit(char *str) {
 }
 
 //? ---------------------------------------------------------------------------
+//? (NEW) broadcast_str
+//? ---------------------------------------------------------------------------
+// Role : envoyer le texte 'str' (deja construit) a tous les fds actifs,
+// sauf le socket serveur lui-meme et l'expediteur (sender_fd)
+//  - "sender_fd" peut etre un fd client normal (message envoye par un client)
+//    ou un fd qui vient d'etre enregistre/retire (arrivee/depart)
+//  - FD_ISSET(fd, &wfds) verifie que ce fd est bien pret a recevoir un send()
+//    sans bloquer (version simple : pas de gestion du cas "pas pret" pour
+//    l'instant, cf. lazy client a ajouter plus tard si le temps le permet)
+void broadcast_str(int sender_fd, char *str)
+{
+	//& 1. boucle pour parcourir les fds actifs
+	for (int fd = 0 ; fd <= max_fd ; fd++)
+	{
+		//& 2. si fd actif (est ce n'est ni le server ni le sender)
+		if ( fd != server_fd && fd != sender_fd && FD_ISSET(fd, &wfds))
+		{
+			//& 3. broadcast le string
+			send(fd, str, strlen(str), 0);
+		}
+	}
+}
+
+//? ---------------------------------------------------------------------------
 //? (NEW) resgister_client
 //? ---------------------------------------------------------------------------
-// Role :
-
+// Role : enregistrer un nouveau client sur le serveur et en informer les
+// autres clients deja connectes
+//  - met a jour max_fd si necessaire (pour select())
+//  - ajoute le fd a l'ensemble des fds actifs (afds)
+//  - attribue un id logique unique et croissant (jamais reutilise)
+//  - construit et diffuse le message d'arrivee a tous les autres clients
 void register_client(int fd)
 {
 	//& 1. update fd_max
 	if (fd > max_fd)
 		max_fd = fd;
 
-	//& 2. register client
+	//& 2. register client (ajouter dans afds)
 	FD_SET(fd, &afds);
+	ids[fd] = next_id++;
 
-	
+	//& 3. construire le msg dans send_buf
+	sprintf(serv_send_buf, "server: client %d just arrived\n", ids[fd]);
+
+	//& 4. broadcast le msg
+	broadcast_str(fd, serv_send_buf);
+}
+
+//? ---------------------------------------------------------------------------
+//? (NEW) remove_client
+//? ---------------------------------------------------------------------------
+// Role : deconnecter proprement un client et en informer les autres
+//  - retire le fd de l'ensemble actif (afds)
+//  - ferme le socket (evite un fd leak)
+//  - libere son buffer de reception (evite un memory leak)
+//  - remet le pointeur a NULL (evite un double-free si ce fd est reutilise
+//    plus tard par le systeme pour un nouveau client)
+//  - construit et diffuse le message de depart aux autres clients
+void remove_client(int fd)
+{
+	//& 1. desinscrire le client (retirer dans afds)
+	FD_CLR(fd, &afds);
+
+	//& 2. nettoyer les ressources
+	close(fd);
+	free(clts_recv_buf[fd]);
+	clts_recv_buf[fd] = NULL;
+
+	//& 3. construire le msg dans send_buf
+	sprintf(serv_send_buf, "server: client %d just left\n", ids[fd]);
+
+	//& 4. broadcast le msg
+	broadcast_str(fd, serv_send_buf);
 }
 
 int main() {
