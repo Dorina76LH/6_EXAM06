@@ -401,43 +401,128 @@ void handle_client_msg(int fd)
 	}
 }
 
+//? ---------------------------------------------------------------------------
+//? (NEW) main
+//? ---------------------------------------------------------------------------
+// Variables locales utilisees :
+//  - connfd  : fd du client fraichement accepte, retourne par accept() a
+//              chaque nouvelle connexion (different de server_fd, qui lui
+//              ne sert qu'a ECOUTER les nouvelles connexions, un seul fixe
+//              pendant toute la vie du programme)
+//  - len     : socklen_t (pas un int !) attendu par accept(), qui exige un
+//              pointeur vers ce type precis pour la taille de la structure
+//              d'adresse passee en parametre. Rempli par nous avant l'appel
+//              (len = sizeof(cli)), potentiellement mis a jour par accept()
+//  - servaddr: adresse du SERVEUR (IP 127.0.0.1 + port donne en argument),
+//              remplie par nous, utilisee par bind() pour dire au systeme
+//              sur quelle IP/port ecouter
+//  - cli     : adresse du CLIENT qui se connecte, remplie automatiquement
+//              par accept() (IP/port source du client). Doit exister et
+//              etre passee a accept() meme si son contenu n'est jamais
+//              utilise ensuite dans ce projet
+// int accept(int socket, struct sockaddr *restrict address, 
+//				socklen_t *restrict address_len);
+// int select(int nfds, fd_set *restrict readfds, fd_set *restrict writefds,
+// 				fd_set *restrict errorfds, struct timeval *restrict timeout);
+int main(int argc, char **argv)
+{
+	//& 1. declaration des variables
+	// int sockfd; -> variable globale server_fd
+	int connfd;
+	//int len;
+	socklen_t len;
+	struct sockaddr_in servaddr;
+	struct sockaddr_in cli;
 
-int main() {
-	int sockfd, connfd, len;
-	struct sockaddr_in servaddr, cli; 
+	//& 2. check argc
+	if (argc != 2)
+		error_exit("Wrong number of arguments\n");
 
 	// socket create and verification 
-	sockfd = socket(AF_INET, SOCK_STREAM, 0); 
-	if (sockfd == -1) { 
-		printf("socket creation failed...\n"); 
-		exit(0); 
-	} 
-	else
-		printf("Socket successfully created..\n"); 
+	FD_ZERO(&afds);
+	server_fd = socket(AF_INET, SOCK_STREAM, 0); 
+	if (server_fd == -1)
+		error_exit("Fatal error\n");
+	//else
+		//printf("Socket successfully created..\n"); 
 	bzero(&servaddr, sizeof(servaddr)); 
 
 	// assign IP, PORT 
 	servaddr.sin_family = AF_INET; 
 	servaddr.sin_addr.s_addr = htonl(2130706433); //127.0.0.1
-	servaddr.sin_port = htons(8081); 
+	//servaddr.sin_port = htons(8081);
+	int port = atoi(argv[1]);
+	servaddr.sin_port = htons(port); 
   
 	// Binding newly created socket to given IP and verification 
-	if ((bind(sockfd, (const struct sockaddr *)&servaddr, sizeof(servaddr))) != 0) { 
-		printf("socket bind failed...\n"); 
-		exit(0); 
-	} 
-	else
-		printf("Socket successfully binded..\n");
-	if (listen(sockfd, 10) != 0) {
-		printf("cannot listen\n"); 
-		exit(0); 
+	if ((bind(server_fd, (const struct sockaddr *)&servaddr, sizeof(servaddr))) != 0)
+		error_exit("Fatal error\n");
+	//else
+		//printf("Socket successfully binded..\n");
+	if (listen(server_fd, 10) != 0)
+		error_exit("Fatal error\n");
+	//? new
+	FD_SET(server_fd, &afds); // ajouter server_fd dans afds
+	max_fd = server_fd;	// update max_fd
+
+	//? new boucle ecoute
+	while (1)
+	{
+		//& 1. recopier afds dans wfds et rfds avant chaque select()
+		//&    select() modifie ces sets a chaque tour -> faire une copie propre
+		wfds = afds;
+		rfds = afds;
+
+		//& 2. attendre qu'au moins un fds soit pret en lecture ou en ecriture
+		if (select(max_fd + 1, &rfds, &wfds, NULL, NULL))
+			error_exit("Fatal error\n");
+
+		//& 3. parcourir tous les fds pour identifier les fds actifs
+		for (int fd = 0; fd <= max_fd; fd++)
+		{
+			//& 3.1 fd inactif -> rien a lire -> continue
+			if (!FD_ISSET(fd, &rfds))
+				continue;
+
+			//& 3.2 fd = serveur_fd -> nouvelle connexion -> register
+			if (fd == server_fd)
+			{
+				len = sizeof(cli);
+				//connfd = accept(sockfd, (struct sockaddr *)&cli, &len);
+				connfd = accept(server_fd, (struct sockaddr *)&cli, &len);
+				if (connfd < 0) 
+					continue; // echec transitoire
+				// { 
+				// 	printf("server acccept failed...\n"); 
+				// 	exit(0); 
+				// } 
+				// else
+				// 	printf("server acccept the client...\n");
+
+				register_client(connfd);
+				continue;
+			}
+
+			//& 3.3 donnees recues d'un client existant
+			ssize_t rec_bytes = recv(fd, serv_recv_buf, 1000000, 0);
+
+			//& si client deconnecte
+			if (rec_bytes <= 0)
+			{
+				remove_client(fd);
+				continue;
+			}
+
+			//& 3.4 ajouter '\0' et cumuler pour client
+			serv_recv_buf[rec_bytes]= '\0';
+			clts_recv_buf[fd] = str_join(clts_recv_buf[fd], serv_recv_buf);
+			
+			//& check erreur malloc
+			if (!clts_recv_buf[fd])
+				error_exit("Fatal error\n");
+
+			//& 3.5 traiter les lignes completes
+			handle_client_msg(fd);
+		}
 	}
-	len = sizeof(cli);
-	connfd = accept(sockfd, (struct sockaddr *)&cli, &len);
-	if (connfd < 0) { 
-        printf("server acccept failed...\n"); 
-        exit(0); 
-    } 
-    else
-        printf("server acccept the client...\n");
 }
