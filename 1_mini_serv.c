@@ -526,3 +526,18 @@ int main(int argc, char **argv)
 		}
 	}
 }
+
+/*
+
+gcc -Wall -Werror -Wextra mini_Serv.c -o mini_serv
+./mini_serv -> "wrong number of arguments"
+valgrind --leak-check=full ./mini_serv 8080
+
+nc 127.0.0.1 8080
+- msg de bienvenue
+- envoi msg (chez les autres pas chez moi)
+- envoi msg avec plusieurs \n -> une ligne par partie
+- fermeture terminal (ctrC ou ctrlD) -> msg client partie
+- msg envoye cahr par char sans \n -> broadcast final seulement
+
+*/
